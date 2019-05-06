@@ -1,9 +1,5 @@
 # GO学习笔记
 
-## go语言的基础数据类型源码位置
-
-> runtime 包里
-
 
 
 ## 服务端推荐几本书：
@@ -15,6 +11,114 @@
 5. 高性能MySQL
 6. MySQL 技术内幕InnoDB引擎
 7. Redis 实战
+
+
+
+## GO工具
+
+
+
+### govendor包依赖管理工具
+
+使用 govendor 进行项目依赖管理，该工具将 项目依赖的外部包拷贝到项目中的vendor目录下，并通过 vendor.json 文件来记录依赖包的版本,方便用户使用相对稳定的依赖。<font color=red>编译的时候，系统优先从vendor目录中寻找依赖包，如果vendor中没有，然后再去GOPATH中寻找</font>。
+
+#### 命令集合
+
+|  指令  |                          含义                          |
+| :----: | :----------------------------------------------------: |
+|  init  |       创建 `vendor` 文件夹和 `vendor.json` 文件        |
+|  list  |                  列出已经存在的依赖包                  |
+|  add   |     从 `$GOPATH` 中添加依赖包，会加到 vendor.json      |
+| update |                从 `$GOPATH` 升级依赖包                 |
+| remove |               从 `vendor` 文件夹删除依赖               |
+| status |        列出本地丢失的、过期的和修改的`package`         |
+| fetch  |      从远端库添加或者更新 `vendor` 文件中的依赖包      |
+|  sync  | 本地存在`vendor.json` 时候拉取依赖包，匹配所记录的版本 |
+|  get   |                     等同于`go get`                     |
+
+
+
+#### vendor中依赖包的类型
+
+对于 govendor 来说,依赖包主要有以下多种类型:
+
+| 状态      | 缩写状态 | 含义                                           |
+| --------- | -------- | ---------------------------------------------- |
+| +local    | l        | 本地包,及项目自身的包组织                      |
+| +external | e        | 外部包,即被 $GOPATH 管理,但不在 vendor 目录下  |
+| +vendor   | v        | 已被 govendor 管理,即在vendor目录下            |
+| +std      | s        | 标准库中的包                                   |
+| +unused   | u        | 未使用的包,即包在vendor目录下,但项目并没有使用 |
+| +missing  | m        | 代码引用了依赖包,但该报并没有找到              |
+| +program  | p        | 主程序包,意味着可以编译为执行文件              |
+| +outside  |          | 外部包和缺失的包                               |
+| +all      |          | 所有的包                                       |
+
+#### 简单的使用
+
+- 安装，该命令会将govendor可执行文件下载到 $GOPATH 的 bin 目录下
+
+  ```shell
+  $ go get github.com/kardianos/govendor
+  ```
+
+  命令行执行`govendor`	,查看安装结果.
+
+  > **注意**: 需要把 `$GOPATH/bin/`加到`PATH`中
+
+- 使用如下：
+
+  ```shell
+  # 进到 GOPATH 中的一个项目中
+  cd "my project in GOPATH"
+  
+  # 初始化 vendor 目录, project 下出现 vendor 目录
+  govendor init
+  
+  # 将该项目依赖的GOPATH中的包，添加到vendor中
+  govendor add +external
+  
+  # 查看vendor中的包依赖情况
+  govendor list
+  
+  # 查看vendor中某一特定包的依赖情况
+  govendor list -v fmt
+  
+  # 从远程获取 golang.org/x/net/context 包 指定的版本或修订
+  govendor fetch golang.org/x/net/context@a4bbce9fcae005b22ae5443f6af064d80a6f5a55
+  govendor fetch golang.org/x/net/context@v1   
+  
+  # 获取标签和分支名为 v1 的context包
+  govendor fetch golang.org/x/net/context@=v1  
+  
+  # 更新一个包到最新
+  govendor fetch golang.org/x/net/context
+  
+  # 格式化本地依赖库库
+  govendor fmt +local
+  
+  # Build everything in your repository only
+  govendor install +local
+  
+  # Test your repository only
+  govendor test +local
+  ```
+
+
+
+### gofmt工具的使用
+
+```shell
+gofmt 文件名 		# - 输出格式化后的代码
+
+gofmt -w 文件名 	# - 重新格式化代码并更新文件
+
+gofmt -r'rule' 文件名 	# - 格式化代码前执行指定的规则
+
+gofmt 包所在的路径 	# - 格式化整个包下的源文件
+```
+
+
 
 
 
@@ -249,7 +353,13 @@ num, err = o.Delete(&u)
 
 
 
-## goroutin
+## go语言的基础数据结构
+
+### go语言的基础数据类型源码位置
+
+> runtime 包里
+
+### goroutin
 
 #### 并发和并行：
 
@@ -277,15 +387,15 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
-## channel
+### channel
 
-### channel的引出
+#### channel的引出
 
 ​	当多个协程操作同一内存地址时，会产生资源竞争而发生错误。于是就设计出用来协程之间通信的channel。channel背后也是用了锁的机制。
 
 
 
-### channel知识点
+#### channel知识点
 
 1. channel的读和写可以不同步（异步），但是如果只写不读，会死锁；
 2. 
@@ -294,7 +404,55 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
-## context包的使用
+### Interface使用的细节
+
+- 接口被指针类型变量实现 且 方法绑定在指针类型上，接口实例化后的对象和指针类型变量是同一个实例
+
+
+
+
+
+### Slice源码分析
+
+
+
+### 反射
+
+
+
+
+
+
+
+## go程序中变量名声明的规范
+
+在 Go 编程中最好用短的变量名，尤其是那些作用域比较有限的局部变量
+
+> 用 `c` 而不是 `lineCount`
+>
+> 用 `i` 而不是 `sliceIndex`
+
+1. 基本规则：距离声明的地方越远，变量名需要越具可读性。
+
+2. 作为一个函数接收者，1、2 个字母的变量比较高效。
+
+3. 像循环指示变量和输入流变量，用一个单字母就可以。
+
+4. 越不常用的变量和公共变量，需要用更具说明性的名字。
+
+
+
+## 点导包
+
+测试的时候使用，用来将测试代码伪装成包内文件
+
+
+
+
+
+## 官方包笔记
+
+### context包的使用
 
 #### context包的作用
 
@@ -302,7 +460,7 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
-#### func Background() Context && func TODO() Context
+#### func Background() Context 和 func TODO() Context
 
 - 这是context包内部已经实现好了的两个空 context 对象；
 - 可以通过调用小标题中的两个方法获得该 context 对象；
@@ -407,56 +565,3 @@ go build -race main.go	//	然后再执行main.exe
 - Deadline()，当goroutine快要被cancel的时候，返回截止时间。
 
 - Value()，返回值。
-
-
-
-## Interface使用的细节
-
-- 接口被指针类型变量实现 且 方法绑定在指针类型上，接口实例化后的对象和指针类型变量是同一个实例
-
-
-
-
-
-## Slice源码分析
-
-
-
-
-
-## gofmt工具的使用
-
-```shell
-gofmt 文件名 		# - 输出格式化后的代码
-
-gofmt -w 文件名 	# - 重新格式化代码并更新文件
-
-gofmt -r'rule' 文件名 	# - 格式化代码前执行指定的规则
-
-gofmt 包所在的路径 	# - 格式化整个包下的源文件
-```
-
-
-
-## go程序中变量名声明的规范
-
-在 Go 编程中最好用短的变量名，尤其是那些作用域比较有限的局部变量
-
-> 用 `c` 而不是 `lineCount`
->
-> 用 `i` 而不是 `sliceIndex`
-
-1. 基本规则：距离声明的地方越远，变量名需要越具可读性。
-
-2. 作为一个函数接收者，1、2 个字母的变量比较高效。
-
-3. 像循环指示变量和输入流变量，用一个单字母就可以。
-
-4. 越不常用的变量和公共变量，需要用更具说明性的名字。
-
-
-
-## 点导包
-
-测试的时候使用，用来将测试代码伪装成包内文件
-

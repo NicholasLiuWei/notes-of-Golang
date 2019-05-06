@@ -104,6 +104,10 @@ gofmt 包所在的路径 	# - 格式化整个包下的源文件
 
 
 
+### 设置自动代理
+
+[GCTT | 【干货】go get 自动代理](https://mp.weixin.qq.com/s/N1tixHZuG6MLiWTd4vIQrQ)
+
 
 
 ## 字符串处理
@@ -402,6 +406,12 @@ func (e *errorString) Error() string {
 
 
 
+### Map
+
+
+
+
+
 ### recorver
 
 recover 使用的三个要点：
@@ -413,7 +423,7 @@ recover 使用的三个要点：
 具体使用案例：
 
 ```go
-//	1:
+//	1: 没有在defer中使用
 func main() {
     if r := recover(); r != nil {
     	log.Fatal(r)
@@ -423,7 +433,7 @@ func main() {
     	log.Fatal(r)
     }
 }
-//	2:
+//	2: 不可以在defer的多层函数中调用
 func main() {
     defer func() {
         if r := MyRecover(); r != nil {
@@ -436,7 +446,7 @@ func MyRecover() interface{} {
     log.Println("trace...")
     return recover()
 }
-//	3:
+//	3: 不可再defer的多层函数中调用
 func main() {
     defer func() {
         defer func() {
@@ -447,7 +457,7 @@ func main() {
 	}()
 	panic(1)
 }
-//	4:
+//	4: 正确
 func MyRecover() interface{} {
 	return recover()
 }
@@ -455,12 +465,12 @@ func main() {
     defer MyRecover()
     panic(1)
 }
-//	5:
+//	5: 必须要在defer的函数中调用
 func main() {
     defer recover()
     panic(1)
 }
-//	6:
+//	6: 正确
 func main() {
     defer func() {
         if r := recover(); r != nil { ... }
@@ -534,6 +544,25 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
+#### 判断对象是否实现了某接口
+
+例码：
+
+```go
+type MyWriter struct{}
+func (m *MyWriter) Write(p []byte) (n int, err error) {
+	return 0, nil
+}
+// 声明一个匿名变量
+var _ io.Writer = (*MyWriter)(nil)
+```
+
+**解释：**
+
+1. 检查 *MyWriter 是否实现了 io.Writer 接口
+2. (*MyWriter)(nil) 是将nil强转为 *MyWriter 类型
+3. 若*MyWriter没有实现 io.Writer 接口，编译器会直接报错
+
 
 
 ### Slice源码分析
@@ -541,6 +570,24 @@ go build -race main.go	//	然后再执行main.exe
 
 
 ### 反射
+
+
+
+### 闭包
+
+```go
+func Closure() func() int {
+    var x int
+    return func() int {
+        x++
+        return x
+    }
+}
+```
+
+调用这个函数会返回一个函数变量。`i := Closure()`：通过把这个函数变量赋值给 `i`，`i` 就成为了一个**闭包**。
+
+**注意：** `i` 保存着对 `x` 的引用，可以理解 `i` 中有着一个指针指向 x 或 **i 中有 x 的地址**。由于 `i` 有着指向 `x` 的指针，所以可以修改 `x`。
 
 
 
@@ -605,6 +652,30 @@ func (pool) run() {
 ### Go 包初始化流程：
 
 ![Fr2R83ovb9LYtta-DxOJQ1mUtZuq](assets/Fr2R83ovb9LYtta-DxOJQ1mUtZuq.png)
+
+### go语言的执行顺序的规则
+
+A依赖B，A虽然在B的前边，执行顺序依然是先B再A；
+
+下面看一个初始化的例子，例码：
+
+```go
+var a, b, c = f() + v(), g(), sqr(u()) + v()
+
+func f() int { return c }
+func g() int  { return a }
+func sqr(x int) int { return x*x }
+func u() int { return 1}
+func v() int { return 2}
+```
+
+**分析：**
+
+1. 首先执行的是给a赋值的语句，但是f() 依赖于c ，所以必须先执行 c 赋值语句；
+2. 执行`sqr(u()) + v()`的时候依赖 u()，所以这里最先执行的是 u()；
+3. 按照这种规则，推出函数的执行顺序是：u()、sqr()、v()、f()、v()、g()。
+
+
 
 
 

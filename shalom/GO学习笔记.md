@@ -1,22 +1,6 @@
 # GO学习笔记
 
-
-
-## 服务端推荐几本书：
-
-1. 图解 TCP/IP 协议；
-2. 图解 HTTP 协议；
-3. Linux/Unix 设计思想
-4. Unix 环境高级编程
-5. 高性能MySQL
-6. MySQL 技术内幕InnoDB引擎
-7. Redis 实战
-
-
-
 ## GO工具
-
-
 
 ### govendor包依赖管理工具
 
@@ -355,9 +339,139 @@ num, err = o.Delete(&u)
 
 ## go语言的基础数据结构
 
-### go语言的基础数据类型源码位置
+### 基础数据类型源码位置
 
-> runtime 包里
+> runtime 包里 和 buildin包里
+
+### go语言中的error
+
+#### 源码：
+
+```go
+// 路径：buildin/buildin.go
+type error interface {
+	Error() string
+}
+```
+
+- 通过源码可以看出，error本质上是一个带方法的 interface；
+- 带方法的interface，底层存储了两个字段：实现该interface的变量的原始类型 和 该变量的值；
+- 只有上述两个字段都为 nil 的时候，判断 interface == nil 才为 true。
+
+#### 可能会踩的坑
+
+使用自定义的 错误类型 的时候，例码：
+
+```go
+// 这里定义了一个能够实现 error 的结构体，自定义的错误类型
+type MyError struct {
+	s string
+}
+func (e *MyError) Error() string {
+	return e.s
+}
+func test() error {
+	// 这里声明了该错误类型的变量，并且赋值为nil
+	var a *MyError
+	a = nil
+	// 这里return的时候，a被自动转成 error类型，里面存储的类型不为nil
+	return a
+}
+func main() {
+    // 这里的err是一个接口，存储的类型为 MyError，值为空，所以这里返回的err永远都不为 nil
+	err := test()
+	fmt.Println(err == nil)
+}
+```
+
+上述代码引用的是 errors.New() 方法的源代码：
+
+```go
+func New(text string) error {
+	return &errorString{text}
+}
+
+type errorString struct {
+	s string
+}
+
+func (e *errorString) Error() string {
+	return e.s
+}
+```
+
+
+
+### recorver
+
+recover 使用的三个要点：
+
+1. recover 必须在 defer 中调用；
+2. recover 必须在函数中调用，匿名不匿名都行；
+3. recover 不能在多层函数中调用。
+
+具体使用案例：
+
+```go
+//	1:
+func main() {
+    if r := recover(); r != nil {
+    	log.Fatal(r)
+    }
+    panic(123)
+    if r := recover(); r != nil {
+    	log.Fatal(r)
+    }
+}
+//	2:
+func main() {
+    defer func() {
+        if r := MyRecover(); r != nil {
+            fmt.Println(r)
+        }
+    }()
+    panic(1)
+}
+func MyRecover() interface{} {
+    log.Println("trace...")
+    return recover()
+}
+//	3:
+func main() {
+    defer func() {
+        defer func() {
+            if r := recover(); r != nil {
+            	fmt.Println(r)
+        	}
+    	}()
+	}()
+	panic(1)
+}
+//	4:
+func MyRecover() interface{} {
+	return recover()
+}
+func main() {
+    defer MyRecover()
+    panic(1)
+}
+//	5:
+func main() {
+    defer recover()
+    panic(1)
+}
+//	6:
+func main() {
+    defer func() {
+        if r := recover(); r != nil { ... }
+    }()
+    panic(nil)
+}
+```
+
+
+
+
 
 ### goroutin
 
@@ -391,14 +505,24 @@ go build -race main.go	//	然后再执行main.exe
 
 #### channel的引出
 
-​	当多个协程操作同一内存地址时，会产生资源竞争而发生错误。于是就设计出用来协程之间通信的channel。channel背后也是用了锁的机制。
+当多个协程操作同一内存地址时，会产生资源竞争而发生错误。于是就设计出用来协程之间通信的channel。channel背后也是用了锁的机制。
 
+#### 无缓冲chan中包含的GO并发内存模型
 
+1. 发送数据前接收必须准备好，如果没有准备好会出现死锁； 
+2. 接收完成之前发送必须已经结束，保证接收的数据完整； 
 
-#### channel知识点
+<font color=red>上述两点是并发模型的重要保证</font>
 
-1. channel的读和写可以不同步（异步），但是如果只写不读，会死锁；
-2. 
+#### 导致死锁的情况
+
+1. chan 关闭后，往该 chan 发送数据会导致 runtime panic； 
+2. channel的读和写可以不同步（异步），但是如果只写不读，会死锁；
+
+#### 使用小技巧
+
+2. **判断chan是否关闭：**从该 chan 接收数据会立刻返回，同时可以加入第二个参数，判断是关闭了还是正常数据返回，即：`x, ok :=<-c` ，这时候 ok 是 false，因为此特性，close 一个 chan 可以用于广播（广播通道关闭的信号）； 
+2. 往一个 nil chan 发送数据会永远阻塞
 
 
 
@@ -420,11 +544,41 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
+## go的并发
+
+### MPG模型
+
+- 在单CPU的情况下，go的并发是非抢占的，后边的协程要执行，首先要有协程出现阻塞，延迟或者放弃执行
+
+### 如何控制并发执行的 Goroutine 的最大数目？
+
+例码：
+
+```go
+type pool struct {
+	maxNum   int        // 最大Goroutine 数目
+	taskChan chan *Task // 接收并传递任务的通道
+}
+
+func (pool) work() {
+	for range taskChan {
+		Task() // 这里执行任务
+	}
+}
+func (pool) run() {
+	for i := 0; i < pool.maxNum; i++ {
+		go pool.work() // 这里只启动maxNum个go程
+	}
+}
+```
 
 
 
 
-## go程序中变量名声明的规范
+
+## go程序中的规范
+
+### 变量名声明规范
 
 在 Go 编程中最好用短的变量名，尤其是那些作用域比较有限的局部变量
 
@@ -442,15 +596,19 @@ go build -race main.go	//	然后再执行main.exe
 
 
 
-## 点导包
+## 导包
+
+### 点导包
 
 测试的时候使用，用来将测试代码伪装成包内文件
 
+### Go 包初始化流程：
+
+![Fr2R83ovb9LYtta-DxOJQ1mUtZuq](assets/Fr2R83ovb9LYtta-DxOJQ1mUtZuq.png)
 
 
 
-
-## 官方包笔记
+## 官方库解析
 
 ### context包的使用
 

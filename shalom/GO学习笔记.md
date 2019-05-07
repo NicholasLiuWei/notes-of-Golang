@@ -341,7 +341,7 @@ num, err = o.Delete(&u)
 
 
 
-## go语言的基础数据结构
+## go语言的基础元素
 
 ### 基础数据类型源码位置
 
@@ -403,6 +403,24 @@ func (e *errorString) Error() string {
 	return e.s
 }
 ```
+
+
+
+### String
+
+字符串是 不可变 值类型，内部⽤用指针指向 UTF-8编码格式的 字节数组。
+
+- 默认值是空字符串 ""。
+- 可以用索引号访问某字节，如 s[i]。
+- 不能⽤用取地址符获取字节元素指针，&s[i] 非法。 
+- 不可变类型，无法修改字节数组。
+- 字节数组尾部不包含 NULL。
+
+
+
+### struct
+
+
 
 
 
@@ -483,31 +501,163 @@ func main() {
 
 
 
-### goroutin
+### goroutine
 
-#### 并发和并行：
+#### goroutine的最佳实现
 
-1. 并发：多个线程在一个CPU中运行，来回切换，微观上看，同一时刻只执行一个线程；
-2. 并行：多个线程在多个CPU中运行，同时执行多个线程。
+**来源链接：**[GCTT 出品 | Go 语言中的同步队列](https://mp.weixin.qq.com/s/HoslXrqteioDzpjzWb8UvQ)
 
-#### Go语言中的主线程和协程
-
-1. 主线程其实是进程的另一种说法；
-2. 协程是Go语言设计者在线程上优化得来的，比线程更轻巧（独立栈空间，共享堆空间）。
-
-
-
-#### MPG模式
-
-1. M : 相当于主线程；P：是协程运行的环境；G：在P中运行的协程
-2. 多个M可运行在多个CPU上，叫做并行，运行在同一CPU上，叫做并发
-3. M主线程和M1协程并发执行
-
-##### 查看多线程竞争关系命令：
+**思想：**不要通过共享内存来通讯，而要通过通讯来共享内存。
 
 ```go
-go build -race main.go	//	然后再执行main.exe
+func tester(q *queue.Queue) {
+   for {
+       test()
+       q.StartT()
+       fmt.Println("Tester starts")
+       pingPong()
+       fmt.Println("Tester ends")
+       q.EndT()
+  }
+}
+func programmer(q *queue.Queue) {
+   for {
+       code()
+       q.StartP()
+       fmt.Println("Programmer starts")
+       pingPong()
+       fmt.Println("Programmer ends")
+       q.EndP()
+  }
+}
+func main() {
+   q := queue.New()
+   for i := 0; i < 10; i++ {
+       go programmer(q)
+  }
+   for i := 0; i < 5; i++ {
+       go tester(q)
+  }
+   select {}
+}
+
+// 用goroutine的方式实现queue
+package queue
+const (
+   msgPStart = iota
+   msgTStart
+   msgPEnd
+   msgTEnd
+)
+type Queue struct {
+   waitP, waitT   int
+   playP, playT   bool
+   queueP, queueT chan int
+   msg            chan int
+}
+func New() *Queue {
+   q := Queue{
+       msg:    make(chan int),
+       queueP: make(chan int),
+       queueT: make(chan int),
+  }
+   go func() {
+       for {
+           select {
+           case n := <-q.msg:
+               switch n {
+               case msgPStart:
+                   q.waitP++
+               case msgPEnd:
+                   q.playP = false
+               case msgTStart:
+                   q.waitT++
+               case msgTEnd:
+                   q.playT = false
+              }
+               if q.waitP > 0 && q.waitT > 0 && !q.playP && !q.playT {
+                   q.playP = true
+                   q.playT = true
+                   q.waitT--
+                   q.waitP--
+                   q.queueP <- 1
+                   q.queueT <- 1
+              }
+          }
+      }
+  }()
+   return &q
+}
+func (q *Queue) StartT() {
+   q.msg <- msgTStart
+   <-q.queueT
+}
+func (q *Queue) EndT() {
+   q.msg <- msgTEnd
+}
+func (q *Queue) StartP() {
+   q.msg <- msgPStart
+   <-q.queueP
+}
+func (q *Queue) EndP() {
+   q.msg <- msgPEnd
+}
+
+// 用互斥锁的方式实现 queue
+package queue
+
+import "sync"
+
+type Queue struct {
+   mut                   sync.Mutex
+   numP, numT            int
+   queueP, queueT, doneP chan int
+}
+
+func New() *Queue {
+   q := Queue{
+       queueP: make(chan int),
+       queueT: make(chan int),
+       doneP:  make(chan int),
+  }
+   return &q
+}
+
+func (q *Queue) StartT() {
+   q.mut.Lock()
+   if q.numP > 0 {
+       q.numP -= 1
+       q.queueP <- 1
+  } else {
+       q.numT += 1
+       q.mut.Unlock()
+       <-q.queueT
+  }
+}
+
+func (q *Queue) EndT() {
+   <-q.doneP
+   q.mut.Unlock()
+}
+
+func (q *Queue) StartP() {
+   q.mut.Lock()
+   if q.numT > 0 {
+       q.numT -= 1
+       q.queueT <- 1
+  } else {
+       q.numP += 1
+       q.mut.Unlock()
+       <-q.queueP
+  }
+}
+
+func (q *Queue) EndP() {
+   q.doneP <- 1
+}
 ```
+
+
 
 
 
@@ -573,6 +723,29 @@ var _ io.Writer = (*MyWriter)(nil)
 
 
 
+### 方法
+
+- 绑定在值类型的方法 和 指针类型的方法是不同的
+
+  - 绑定在指针类型变量的方法，当变量无法取地址时，不能调用
+
+  ```go
+  type duration int
+  
+  func (d *duration) pretty() string {
+  	return fmt.Sprintf("Duration: %d", *d)
+  }
+  
+  func main() {
+      // duration(42)无法取地址，所以不可以调用pretty的方法
+  	duration(42).pretty()
+  }
+  ```
+
+  
+
+
+
 ### 闭包
 
 ```go
@@ -593,29 +766,84 @@ func Closure() func() int {
 
 ## go的并发
 
-### MPG模型
+### 并发和并行：
 
-- 在单CPU的情况下，go的并发是非抢占的，后边的协程要执行，首先要有协程出现阻塞，延迟或者放弃执行
+1. 并发：多个线程在一个CPU中运行，来回切换，微观上看，同一时刻只执行一个线程；
+2. 并行：多个线程在多个CPU中运行，同时执行多个线程。
+
+### Go语言中的主线程和协程
+
+1. 主线程其实是进程的另一种说法；
+2. 协程是Go语言设计者在线程上优化得来的，比线程更轻巧（独立栈空间，共享堆空间）。
+
+
+
+### MPG模式
+
+1. M : 相当于主线程；P：是协程运行的环境；G：在P中运行的协程
+2. 多个M可运行在多个CPU上，叫做并行，运行在同一CPU上，叫做并发
+3. M主线程和M1协程并发执行
+4. 在单CPU的情况下，go的并发是非抢占的，后边的协程要执行，首先要有协程出现阻塞，延迟或者放弃执行
+
+##### 查看多线程竞争关系命令：
+
+```go
+go build -race main.go	//	然后再执行main.exe
+```
+
+
 
 ### 如何控制并发执行的 Goroutine 的最大数目？
 
 例码：
 
 ```go
-type pool struct {
-	maxNum   int        // 最大Goroutine 数目
-	taskChan chan *Task // 接收并传递任务的通道
+// work包管理一个 goroutine 池来完成工作
+package work
+
+import "sync"
+
+// Worker 必须满足接口类型，
+// 才能使用工作池
+type Worker interface {
+    Task()
 }
 
-func (pool) work() {
-	for range taskChan {
-		Task() // 这里执行任务
-	}
+// Pool提供一个goroutine池，这个池可以完成
+// 任何已提交的Worker任务
+type Pool struct {
+    work chan Worker
+    wg   sync.WaitGroup
 }
-func (pool) run() {
-	for i := 0; i < pool.maxNum; i++ {
-		go pool.work() // 这里只启动maxNum个go程
-	}
+
+// New创建一个新工作池
+func New(maxGoroutines int) *Pool {
+    p := Pool{
+        work: make(chan Worker),
+    }
+
+    p.wg.Add(maxGoroutines)
+    for i := 0; i < maxGoroutines; i++ {
+        go func() {
+            for w := range p.work {
+                w.Task()
+            }
+            p.wg.Done()
+        }()
+    }
+
+    return &p
+}
+
+// Run提交工作到工作池
+func (p *Pool) Run(w Worker) {
+    p.work <- w
+}
+
+// Shutdown等待所有goroutine停止工作
+func (p *Pool) Shutdown() {
+    close(p.work)
+    p.wg.Wait()
 }
 ```
 
@@ -655,7 +883,7 @@ func (pool) run() {
 
 ### go语言的执行顺序的规则
 
-A依赖B，A虽然在B的前边，执行顺序依然是先B再A；
+A语句依赖B语句，A虽然在B的前边，执行顺序依然是先B再A；以语句为单位。
 
 下面看一个初始化的例子，例码：
 
@@ -676,6 +904,33 @@ func v() int { return 2}
 3. 按照这种规则，推出函数的执行顺序是：u()、sqr()、v()、f()、v()、g()。
 
 
+
+## go的架构经验
+
+### 设计新类型
+
+在声明一个新类型之后，声明一个该类型的方法之前，需要先回答以下几个问题：
+
+- 这个类型的本质是什么？
+- 如果给这个类型增加或者删除某个值，是要创建一个新值，还是要更改当前的值？
+  - 如果是要创建一个新值，那么该类型的方法就使用值接收者；
+  - 如果是要修改当前值，那么就使用指针接收者。
+
+这几个问题答案会影响整个程序内部传递这个类型的值的方式：是按值做传递，还是按指针做传递。保持传递的一致性很重要。
+
+这个背后的原则是，不要只关注某个方法是如何处理这个值，而是要关注这个值的本质是什么。
+
+大家仔细看看标准库的两个例子：time.Time   类型和 os.File 类型。
+
+**结论：**
+
+- 是使用值接收者还是指针接收者，不应该由该方法是否修改了接收到的值来决定。这个决策应该基于该类型的本质；
+
+#### 思考
+
+为什么Time 类型很多方法都是值类型接收者？
+
+**解答：**因为某一刻的时间对象应该是唯一，不应该被改变，所以使用值类型接收者。
 
 
 

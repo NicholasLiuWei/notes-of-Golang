@@ -341,7 +341,7 @@ num, err = o.Delete(&u)
 
 
 
-## go语言的基础元素
+## go语言的底层基础
 
 ### 基础数据类型源码位置
 
@@ -723,11 +723,54 @@ var _ io.Writer = (*MyWriter)(nil)
 
 
 
-### 方法
+### 类型
+
+Go 中的类型可以分为命名类型（named type） 和未命名类型（unnamed type）。
+
+#### 命名类型
+
+命名类型包括 bool、int、string 等
+
+#### 未命名类型
+
+ array、slice、map 等和 **具体元素类型**、**长度** 等有关，属于未命名类型。
+
+**注意：**具有 相同声明的未命名类型 被视为同一类型。如：
+
+- 具有相同基类型的指针。
+- 具有相同元素类型和⻓度的 array。
+- 具有相同元素类型的 slice。
+- ……
+
+#### 常见坑
+
+```go
+package main
+import (
+    "fmt"
+)
+func main() {
+    type MyMap1 map[string]string
+    type MyMap2 map[string]string
+    var myMap = map[string]string{"name": "polaris"}
+    var myMap1 MyMap1 = myMap
+    // 此处会报错
+    var myMap2 MyMap2 = myMap1
+    fmt.Println(myMap2)
+}
+```
+
+1. `type MyMap map[string]string`  规定了元素的类型必须是string，不能再更改，所以就属于命名类型；
+2. 既然属于命名类型，那么第二题中的 `MyMap1  MyMap2`就是两个不同类型，不能够相互赋值；
+3. 命名类型 和 非命名类型 相互赋值，只要基础类型一样就可以。
+
+
+
+### 函数
 
 - 绑定在值类型的方法 和 指针类型的方法是不同的
 
-  - 绑定在指针类型变量的方法，当变量无法取地址时，不能调用
+  - 绑定在指针类型变量的方法，当变量无法取地址时，不能调用；**注意：**临时值不能够取地址
 
   ```go
   type duration int
@@ -742,7 +785,160 @@ var _ io.Writer = (*MyWriter)(nil)
   }
   ```
 
-  
+
+
+
+#### 函数的各种使用场景
+
+##### 最普通的包级别函数
+
+```go
+package lib
+
+func Sum(a, b int) int {
+    return a + b
+}
+```
+
+##### 在函数内定义函数
+
+```go
+package main
+
+func main() {
+    // 注意定义方式，不能 func sum(a, b int) int {} 这种形式
+    sum := func(a, b int) int {
+        return a + b
+    }
+}
+```
+
+这种形式，一般用于函数内部重复代码的抽取，而这些逻辑在其他函数不会用到，没必要提升为包级别函数。可以在标准库源码中搜索：`:= func` 查到相关使用示例。
+
+##### 匿名函数
+
+```go
+// 保留两个 b 之间（包括 b）的字符串
+strings.TrimFunc("abcfbd", func(r rune) bool {
+    if r != 'b' {
+        return true
+    }
+    return false
+})
+```
+
+匿名函数常用于回调函数，函数返回值是函数的场景。比如 HTTP 中间件经常见到类似这样的代码：
+
+```go
+return func(resp http.ResponseWriter, req *http.Request) {
+    // TODO:
+}
+```
+
+匿名函数另外常见的场景是用于 go 语句和用于 defer 语句。
+
+##### 定义函数类型
+
+函数作为参数和返回值，一般来说，为了增强可读性（可能还有其他考虑），在这两种场景下，我们经常会定义函数类型，典型的是 net/http 包的 HandleFunc 类型：
+
+```go
+type HandlerFunc func(ResponseWriter, *Request)
+```
+
+然后让 HandlerFunc 实现 Handler 接口，也就是实现 `ServeHTTP(ResponseWriter, *Request)` 方法，它的实现只需要简单的调用自己即可：
+
+```go
+func (f HandlerFunc) ServeHTTP(w ResponseWriter, r *Request) {
+    f(w, r)
+}
+```
+
+这样，任何符合 HandlerFunc 类型的函数，都可以通过强制类型转换为 HandlerFunc，进而满足 Handler 接口，**这是一个很好地技巧**。
+
+##### 函数表达式
+
+```go
+myPrintln := fmt.Println
+myPrintln("Hello World!")
+```
+
+**注意: **下列一些内置的函数不能当做表达式使用：
+
+```go
+append cap complex imag len make new real unsafe.Alignof unsafe.Offsetof unsafe.Sizeof
+```
+
+##### 函数作为 数组、slice、map 或 chan 的元素
+
+**注意**：根据 map 对 key 的要求，函数不能用作 map 的 key。
+
+这下面种场景下，为了可读性，一般也会定义函数类型。如：
+
+```go
+func main() {
+    type myfunc func()
+
+    m := make(map[string]myfunc)
+    m["abc"] = func(){
+        fmt.Println("abc")
+    }
+
+    for _, f := range m {
+        f()
+    }
+}
+```
+
+
+
+
+
+### 可寻址
+
+1. 直接值（临时值）不能取地址；
+   如：&true、&"abc"、&math.Int() 等都是非法；
+
+2. 字符串字节元素不能取地址；
+   如：
+
+   ```go
+   s: = "Hello World"
+   _ = &(s[5])
+   ```
+
+3. map 元素不能取地址；
+   如：
+
+   ```go
+   m := map[int]int{99:1}
+   _ = &(m[99])
+   ```
+
+4. 编译器只会自动对 **变量** 取地址，而不会自动对 直接值 取地址；
+   如：
+
+   ```go
+   type T struct{}
+   func (t *T) f() {}
+   func main() {
+       t := T{}
+       (&t).f() // ok ，和下一句等价 
+       t.f()  // ok ，将自动取地址
+   
+       (&T{}).f() // ok
+       // T{}.f() // error
+       // 不会自动取地址
+   }
+   ```
+
+   那么为什么经常见到 `&T{}` 这种写法？`&T{}` 是为了编程方便，添加的一个语法糖 ，是下面形式的缩写，而不是临时值不能取地址的一个例外。
+
+   ```go
+   temp := T{}
+   &temp
+   ```
+
+5. new(T) 相当于取T的地址，等价于&T{}。
 
 
 
@@ -831,6 +1027,7 @@ func New(maxGoroutines int) *Pool {
             p.wg.Done()
         }()
     }
+    p.wg.Wait()
 
     return &p
 }
@@ -868,6 +1065,35 @@ func (p *Pool) Shutdown() {
 3. 像循环指示变量和输入流变量，用一个单字母就可以。
 
 4. 越不常用的变量和公共变量，需要用更具说明性的名字。
+
+
+
+### `_` 标识符的常用场景：
+
+1. 在多重赋值场景中，忽略某些值，常见于 `if`、`for` 等语句中，如：`if _, err := os.Stat(path); os.IsNotExist(err)`；
+
+2. 没有使用的 import 或变量，常用于调试；
+
+3. import 包只使用包的副作用，常见的是导入 mysql 等数据驱动；
+
+4. 接口类型检查，常见的有：
+
+   - 类型断言 ： `if _, ok := val.(json.Marshaler); ok`；
+
+   - 判断类型是否实现某个接口 ： `var _ json.Marshaler = (*RawMessage)(nil)`；
+
+     > `var _ json.Marshaler = &RawMessage{}` 也可以判断，但是这个需要分配内存空间，上面的写法不用。
+
+
+
+### “逗号 ok/error”  模式
+
+Go 支持多返回值，因此经常见到 `, ok` 或 `, error` 这种模式。在一个需要赋值的 if 条件语句中，使用这种模式去检测第二个参数值会让代码显得优雅简洁。这种模式在  Go 语言编码规范中非常重要。我们梳理下都有哪些情况下会使用该模式。
+
+1. 在函数返回时检测错误；
+2. 检测 map 中是否存在一个键值；
+3. 检测一个接口类型变量 varI 是否包含了类型 T，即类型断言；
+4. 检测一个通道 ch 是否关闭；`if input, closed := <-ch; closed { ... }`
 
 
 

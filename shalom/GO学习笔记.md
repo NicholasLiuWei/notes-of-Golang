@@ -1,5 +1,23 @@
 # GO学习笔记
 
+## GO配置
+
+### GOPATH
+
+### Ubuntu中配置
+
+- 编辑 `$HOME/.bashrc` 配置文件，这是一个有关用户的系统配置文件
+
+- 在文件中添加修改GOPATH的命令：
+
+  ```shell
+  export GOPATH=[path1]:[path2]	# 多个路径用:连接
+  ```
+
+- 再执行 `source ~/.bashrc` 命令，重新加载并执行该文件中的命令。
+
+
+
 ## GO工具
 
 ### govendor包依赖管理工具
@@ -90,6 +108,32 @@
 
 
 
+### go Modules 工具
+
+- 每个 module 中都包含一个 go.mod 文件，这个文件定义了该模块的 module path，同时也记录了该模块的依赖包（只会记录直接依赖的包，间接依赖不会记录）；
+- 代码中 import 了一个包，但 `go.mod` 文件里面又没有指定这个包的时候，go 命令行工具会自动寻找包含这个代码包的模块的最新稳定版本，并添加到 `go.mod` 中，将代码缓存到`$GOPATH/pkg/mod`中；
+- `go list -m all` 命令会把当前的模块所有的依赖项都列出来（包括间接依赖）；
+- 除了 `go.mod` 之外，go 命令行工具还维护了一个 `go.sum` 文件，它包含了 指定版本模块内容的哈希值，用于校验；
+- 更新依赖项
+  - 模块的版本包括三个部分：主版本号（major）、次版本号（minor）、修订号（patch）。举个例子：对于版本 `v0.1.2`，主版本号是 0，次版本号是 1，修订号是 2。
+  - 通过`go get`命令更新，比如`go get golang.org/x/text`
+  - **注意：**这里会有版本不兼容的问题；可以指定版本更新` go get rsc.io/sampler@v1.3.1`，不指定@后边默认是latest，代表最新版本的意思
+
+
+
+#### 命令集合
+
+`go mod init $modulePath` 初始化一个module；
+
+`go list` 列出依赖项列表
+
+- `go list all`会将所有的包都列出来；
+- `go list -m all`列出当前module中的依赖；
+
+`go mod tidy`命令移出没有用到的依赖项
+
+
+
 ### gofmt工具的使用
 
 ```shell
@@ -104,9 +148,30 @@ gofmt 包所在的路径 	# - 格式化整个包下的源文件
 
 
 
-### 设置自动代理
+### go vet工具
+
+`go vet`工具检查所有流程控制路径上使用 CancelFuncs。
+
+
+
+### 解决被墙的问题
+
+#### 设置自动代理
 
 [GCTT | 【干货】go get 自动代理](https://mp.weixin.qq.com/s/N1tixHZuG6MLiWTd4vIQrQ)
+
+问题：
+
+1. windows下是否需要写git的bash.exe路径？
+2. http代理应该怎么做？能否使用ssr端口？
+
+
+
+#### 通过环境变量GOPROXY配置代理
+
+```go
+export GOPROXY=https://goproxy.io
+```
 
 
 
@@ -418,9 +483,26 @@ func (e *errorString) Error() string {
 
 
 
-### struct
+### structs
 
+#### 空结构体
 
+```go
+a := struct{}{}
+```
+
+- 空结构体不占内存
+
+- 空结构体变量的地址是一样的
+
+  ```go
+  a := struct{}{}
+  b := struct{}{}
+  c := &struct {}{}
+  fmt.Printf("%p  %p  %p",&a,&b,c)
+  ```
+
+  输出的三个值都相同。
 
 
 
@@ -688,9 +770,16 @@ func (q *Queue) EndP() {
 
 
 
-### Interface使用的细节
+### Interface
 
-- 接口被指针类型变量实现 且 方法绑定在指针类型上，接口实例化后的对象和指针类型变量是同一个实例
+
+
+#### 设计接口需要考虑的事项
+
+1. 在设计接口时，接口的定义应该放在使用该接口的包中，而不是实现了该接口的包中；
+2. 实现包应该返回具体的类型（通常是指针或结构体值），这样，实现包能够方便地增加新方法；
+   比如，os 包中的 File 类型实现了 io 包中的 io.Writer，Open 等方法返回的是具体的 File 指针，而不是 Writer 等接口；
+3. 应该有真实的某接口使用场景，才定义接口，在没有具体的使用场景情况下，是否有必要定义接口很难判断，更难决定接口中应该包含什么方法。这里的意思是，一般来说，先定义具体的类型，在此基础上才能够更好地抽象出接口，尤其是没有具体的接口使用场景下，别凭空想象出一个接口。
 
 
 
@@ -715,11 +804,124 @@ var _ io.Writer = (*MyWriter)(nil)
 
 
 
-### Slice源码分析
+### slice
+
+#### 源码
+
+```go
+type slice struct {
+	array unsafe.Pointer
+	len   int
+	cap   int
+}
+```
+
+切片底层由长度、容量和底层数组组成，本质上是一个结构体。
+
+切片本质上是值传递，因为结构体就是值传递。但是因为array字段不会改变，所以会造成引用传递的假象。
+
+看如下例子：
+
+```go
+func main() {
+	arr := []int{2, 3, 4}
+	fmt.Printf("函数前：%p\n", arr)
+	printSlice(arr)
+	fmt.Println(arr)
+}
+func printSlice(arr []int) {
+	fmt.Printf("函数中：%p\n", arr)
+	arr= append(arr, 5)
+	fmt.Printf("函数中：%p\n", arr)
+}
+```
+
+- 三次打印的结果中，前两次是一样的，第三次是不一样的
+- 子函数里边虽然改变了arr的值，但是main函数里边打印的arr仍然是{2, 3, 4}
+
+有这两点足以说明，切片是值传递，并非引用传递。
 
 
 
-### 反射
+#### slice的扩容
+
+1. 首先由编译器判断slice是否需要扩容
+2. 若编译器无法判断，在runtime时用len和cap判断
+
+
+
+### reflect
+
+
+
+### append
+
+
+
+
+
+### range
+
+#### 底层源码
+
+```go
+// 变量本身
+for_temp := range
+// 遍历之前，就获取切片的长度
+len_temp := len(for_temp)
+for index_temp = 0; index_temp < len_temp; index_temp++ {
+    // 还是按照++的逻辑把元素一个一个取出来
+    value_temp = for_temp[index_temp]
+    // 将index和value赋值
+    index = index_temp
+    value = value_temp
+    original body
+}
+```
+
+
+
+#### 常见坑
+
+1. 下面代码会死循环吗？
+
+   ```go
+   func main() {
+   	v := []int{1, 2, 3}
+   	for i := range v {
+   		v = append(v, i)
+   	}
+   }
+   ```
+
+   **答案: **不会，因为在遍历之前，len就已经被取出，遍历的次数不会因为 遍历时的长度改变 而改变。
+
+2. 下面代码输出什么：
+
+   ```go
+   slice := []int{0, 1, 2, 3}
+   myMap := make(map[int]*int)
+   
+   for index, value := range slice {
+   	myMap[index] = &value
+   }
+   fmt.Println("=====new map=====")
+   for k, v := range myMap {
+   	fmt.Printf("%d => %d\n", k, *v)
+   }
+   ```
+
+   **答案：**
+
+   ```go
+   =====new map=====
+   0 => 3
+   1 => 3
+   2 => 3
+   3 => 3
+   ```
+
+   注意第5行将value的地址存在map中，而value在底层 相对于for循环 是一个全局变量，不会遍历一次声明一次，所以每次遍历 value的地址 是一样的，这样当遍历map的时候，输出的都是同一个地址的值，所以都是3。
 
 
 
@@ -762,7 +964,7 @@ func main() {
 
 1. `type MyMap map[string]string`  规定了元素的类型必须是string，不能再更改，所以就属于命名类型；
 2. 既然属于命名类型，那么第二题中的 `MyMap1  MyMap2`就是两个不同类型，不能够相互赋值；
-3. 命名类型 和 非命名类型 相互赋值，只要基础类型一样就可以。
+3. 命名类型 和 非命名类型 可以相互赋值，只要基础类型一样就可以。
 
 
 
@@ -957,6 +1159,12 @@ func Closure() func() int {
 调用这个函数会返回一个函数变量。`i := Closure()`：通过把这个函数变量赋值给 `i`，`i` 就成为了一个**闭包**。
 
 **注意：** `i` 保存着对 `x` 的引用，可以理解 `i` 中有着一个指针指向 x 或 **i 中有 x 的地址**。由于 `i` 有着指向 `x` 的指针，所以可以修改 `x`。
+
+
+
+## go汇编
+
+
 
 
 
@@ -1166,7 +1374,34 @@ func v() int { return 2}
 
 #### context包的作用
 
-> 主要用于控制goroutine，防止goroutine泄漏
+> 1. 主要用于控制goroutine，防止goroutine泄漏
+>
+> 2. 用来读写一些请求级别的公共数据，下面的函数实现了：
+>
+>    ```go
+>    Value(key interface{}) interface{}
+>    WithValue(parent Context, key, val interface{}) Context
+>    ```
+
+**应用场景**：在 Go http 包的 Server 中，每一个请求在都有一个对应的`goroutine`去处理。请求处理函数通常会启动额外的`goroutine`用来访问后端服务，比如数据库和 RPC 服务。用来处理一个请求的`goroutine`通常需要访问一些与请求特定的数据，比如终端用户的身份认证信息、验证相关的 token、请求的截止时间。当一个请求被取消或超时时，所有用来处理该请求的`goroutine`都应该迅速退出，然后系统才能释放这些`goroutine`占用的资源。
+
+
+
+#### 使用时应遵循的规则
+
+遵循以下规则，用来 保持包之间的接口一致，并可以使用静态分析工具以检查上下文传播。
+
+1. 不要将 Contexts 放入结构体传入函数的参数中，相反`context`应该作为第一个参数传入，命名为`ctx`。eg：
+
+   ```go
+   func DoSomething（ctx context.Context，arg Arg）error { // ... use ctx ... }
+   ```
+
+2. 即使函数允许，也不要传入`nil`的 Context。如果不知道用哪种 Context，可以使用`context.TODO()`。
+
+3. 使用context的Value相关方法只应该用于在程序和接口中传递的和请求相关的元数据，不要用它来传递一些可选的参数
+
+4. 相同的 Context 可以传递给在不同的`goroutine`；Context 是并发安全的。
 
 
 
@@ -1275,3 +1510,89 @@ func v() int { return 2}
 - Deadline()，当goroutine快要被cancel的时候，返回截止时间。
 
 - Value()，返回值。
+
+
+
+#### 使用Context控制groutine的经典案例
+
+##### 代码：
+
+```go
+type userID string
+func tree() {
+    ctx1 := context.Background()
+    ctx2, _ := context.WithCancel(ctx1)
+    ctx3, _ := context.WithTimeout(ctx2, time.Second*5)
+    ctx4, _ := context.WithTimeout(ctx3, time.Second*3)
+    ctx5, _ := context.WithTimeout(ctx3, time.Second*6)
+    ctx6 := context.WithValue(ctx5, userID("UserID"), 123)
+    // ...
+}
+```
+
+这样就构成了Context的继承链
+
+![img](assets/640.webp)
+
+当 3s 超时后，ctx4 会被触发：
+
+![img](assets/640-1558229717471.webp)
+
+当 5s 超时后，ctx3 会被触发，不仅如此，其子节点 ctx5 和 ctx6 也会被触发，即便 ctx5 本身的超时时间还没到，但因为它的父节点已经被触发了，所以它也会被触发：
+
+![img](assets/640-1558229737228.webp)
+
+
+
+### sort包
+
+#### sort()函数
+
+sort()函数的参数是一个实现了三个函数的接口，看源码：
+
+```go
+func Sort(data Interface) { ... }
+type Interface interface {
+	// Len is the number of elements in the collection.
+	Len() int
+	// Less reports whether the element with
+	// index i should sort before the element with index j.
+	Less(i, j int) bool
+	// Swap swaps the elements with indexes i and j.
+	Swap(i, j int)
+}
+```
+
+data是元素的集合，它必须实现Interface接口。
+
+
+
+## 爬虫项目
+
+1. [爬虫准备知识 Colly 学习之二：Colly 的设计  - Go语言中文网 - Golang中文社...](https://studygolang.com/topics/8872) 
+
+
+
+
+
+## 未消化的知识点
+
+- [逃逸分析](<https://mp.weixin.qq.com/s/yG-aWl3oNt3hQlm27FVnnQ>)
+- [Go 中子测试和子基准测试的使用](https://mp.weixin.qq.com/s/xPfeCdepIcVEP824UoLlZQ)
+- Go语言中对于字符串的操作会很频繁，在此分享两篇文章，介绍有关字符串函数操作的。
+  [Go语言中字符串操作常用函数介绍  - Go语言中文网 - Golang中文社区](https://studygolang.com/articles/19914)
+  [Go语言中有关字符串替换函数的介绍  - Go语言中文网 - Golang中文社区](https://studygolang.com/articles/19915)
+- [深入理解 Go map：赋值和扩容迁移 - 煎鱼的清汤锅 - SegmentFault 思否](https://segmentfault.com/a/1190000018632347)
+
+
+
+
+
+
+
+
+
+
+
+
+
